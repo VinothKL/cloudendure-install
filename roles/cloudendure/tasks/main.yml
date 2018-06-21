@@ -1,0 +1,73 @@
+---
+
+- name: Install prerequisites
+  package:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - wget
+    - kernel-devel
+
+- name: Check kernel headers matches running kernel version - Check running kernel version
+  shell: "uname -r"
+  register: running_version
+
+- name: Check kernel headers matches running kernel version - Check installed headers version
+  shell: "ls -lad /usr/src/kernels/* | grep drwx | awk -F '/' '{print $NF}'"
+  register: installed_version
+
+- debug:
+    msg: "Running kernel version {{ running_version.stdout }}, installed headres are {{ installed_version.stdout }}. Exiting."
+  when: running_version.stdout not in installed_version.stdout
+
+- name: Execute when versions are different - kernel update
+  shell: "yum -y update kernel-{{ installed_version.stdout }}"
+  when: running_version.stdout not in installed_version.stdout
+  register: kernel_update
+
+- name: Reboot
+#  command: nohup bash -c "sleep 2s && shutdown -r now" &
+  shell: "sleep 5 && shutdown -r now"
+  async: 1
+  poll: 0
+  when: running_version.stdout not in installed_version.stdout
+
+- name: Wait for the reboot to complete if there was a change.
+  wait_for_connection:
+    connect_timeout: 20
+    sleep: 5
+    delay: 5
+    timeout: 300
+  when: running_version.stdout not in installed_version.stdout
+
+- name: Get uptime to confirm reboot
+  shell: "uptime"
+  register: uptime
+  when: running_version.stdout not in installed_version.stdout
+
+- debug:
+    msg: "Kernel was updated: {{ kernel_update.stdout_lines }}. Current uptime is {{ uptime.stdout }}"
+  when: running_version.stdout not in installed_version.stdout
+
+- name: Check kernel headers matches running kernel version - Check running kernel version
+  shell: "uname -r"
+  register: running_version
+
+- name: Check kernel headers matches running kernel version - Check installed headers version
+  shell: "ls -lad /usr/src/kernels/* | grep drwx | awk -F '/' '{print $NF}'"
+  register: installed_version
+
+- name: Execute when versions matches
+  get_url:
+    url: https://gcp.cloudendure.com/installer_linux.py
+    dest: /root/installer_linux.py
+    mode: 0755
+  when: running_version.stdout in installed_version.stdout or uptime.stdout
+
+- name: Run CloudEndure installer
+  shell: "python /root/installer_linux.py -t {{ cloudendure_installation_token }} --no-prompt"
+  register: cloudendure_installation_output
+  when: running_version.stdout in installed_version.stdout or uptime.stdout
+
+- debug: var=cloudendure_installation_output
+  when: running_version.stdout in installed_version.stdout or uptime.stdout
